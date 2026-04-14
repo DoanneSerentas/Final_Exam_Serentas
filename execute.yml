@@ -1,0 +1,7 @@
+---
+- name : Final exam playbook
+  hosts: all
+  become: yes
+
+  roles:
+    - finals

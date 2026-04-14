@@ -1,0 +1,101 @@
+---
+# tasks file for finals
+- name: Update MOTD with managed message
+  copy:
+    content: "Ansible Managed by Serentas\n"
+    dest: /etc/motd
+    mode: '0644'
+
+- name: Update apt cache
+  apt:
+    update_cache: yes
+    cache_valid_time: 3600
+  when: ansible_os_family == "Debian"
+
+- name: Install Ansible on all nodes
+  package:
+    name: ansible
+    state: present
+  retries: 3
+  delay: 10
+
+- name: Install Debian prerequisites
+  apt:
+    name: [autoconf, gcc, libc6, make, wget, unzip, apache2, apache2-utils, php, libgd-dev, openssl, libssl-dev]
+    state: present
+    update_cache: yes
+  when: ansible_os_family == "Debian"
+
+- name: Install CentOS prerequisites
+  dnf:
+    name: [gcc, glibc, glibc-common, perl, httpd, php, wget, gd, gd-devel, openssl-devel, postfix]
+    state: present
+  when: ansible_os_family == "RedHat"
+
+- name: Disable SELinux on CentOS
+  selinux:
+    state: disabled
+  when: ansible_os_family == "RedHat"
+
+- name: Download Nagios Source
+  get_url:
+    url: "https://go.nagios.org/get-core/4-5-12"
+    dest: "/tmp/nagioscore.tar.gz"
+
+- name: Extract Nagios Source
+  unarchive:
+    src: "/tmp/nagioscore.tar.gz"
+    dest: /tmp
+    remote_src: yes
+
+- name: Find extracted Nagios directory
+  find:
+    paths: /tmp
+    patterns: "nagios-core-*"
+    file_type: directory
+  register: nagios_dir
+
+- name: Compile and Install Nagios Core
+  shell: |
+    ./configure {{ '--with-httpd-conf=/etc/apache2/sites-enabled' if ansible_os_family == 'Debian' else '' }}
+    make all
+    make install-groups-users
+    usermod -a -G nagios {{ 'www-data' if ansible_os_family == 'Debian' else 'apache' }}
+    make install
+    make install-daemoninit
+    make install-commandmode
+    make install-config
+    make install-webconf
+  args:
+    chdir: "{{ nagios_dir.files[0].path }}"
+    creates: /usr/local/nagios/bin/nagios
+
+- name: Enable Apache modules (Debian only)
+  shell: a2enmod rewrite cgi
+  when: ansible_os_family == "Debian"
+  notify: restart apache
+
+- name: Create Nagios Admin User
+  htpasswd:
+    path: /usr/local/nagios/etc/htpasswd.users
+    name: "doanne"
+    password: "cpe123"
+    owner: nagios
+    mode: '0640'
+
+- name: Open Firewall Port 80
+  firewalld:
+    port: 80/tcp
+    permanent: yes
+    state: enabled
+    immediate: yes
+  when: ansible_os_family == "RedHat"
+
+- name: Ensure services are started
+  service:
+    name: "{{ item }}"
+    state: started
+    enabled: yes
+  loop:
+    - "{{ 'apache2' if ansible_os_family == 'Debian' else 'httpd' }}"
+    - nagios
