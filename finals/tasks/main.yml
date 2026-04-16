@@ -69,6 +69,7 @@
   args:
     chdir: "{{ nagios_dir.files[0].path }}"
     creates: /usr/local/nagios/bin/nagios
+  when: nagios_dir.files | length > 0
 
 - name: Enable Apache modules (Debian only)
   shell: a2enmod rewrite cgi
@@ -82,6 +83,7 @@
     password: "cpe123"
     owner: nagios
     mode: '0640'
+  when: nagios_dir.files | length > 0
 
 - name: Open Firewall Port 80
   firewalld:
@@ -98,4 +100,11 @@
     enabled: yes
   loop:
     - "{{ 'apache2' if ansible_os_family == 'Debian' else 'httpd' }}"
-    - nagios
+  when: true
+
+- name: Start Nagios service
+  service:
+    name: nagios
+    state: started
+    enabled: yes
+  when: nagios_dir.files | length > 0
